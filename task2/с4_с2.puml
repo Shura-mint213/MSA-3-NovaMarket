@@ -1,4 +1,4 @@
-@startuml NovaMarket_C2_EDA_v1
+@startuml NovaMarket_C2_EDA_v2
 
 !include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
 
@@ -17,6 +17,8 @@ System_Boundary(nova_market, "NovaMarket System Boundary") {
     Container(catalog, "Catalog Service", "Microservice", "Filters, lists, and aggregates product data")
     Container(cart, "Cart Service", "Microservice (Redis)", "Temporary storage for user cart items")
     Container(notification, "Notification Service", "Microservice", "Sends status alerts to users and sellers")
+    Container(review_service, "Review Service", "Microservice", "Manages reviews & ratings")
+    Container(query_orders_service, "Query Orders Service", "Microservice (CQRS Read Model)", "Aggregates order history from events")
 }
 
 System_Ext(payment_gateway, "Payment Gateway", "External Service", "Processes payments and webhooks")
@@ -24,7 +26,7 @@ System_Ext(delivery, "Delivery Service", "External Service", "Handles shipping a
 
 ' === Связи ===
 Rel(user, mobile_app, "Uses app", "REST")
-Rel(mobile_app, api_gateway, "Sends requests (e.g., create order with address)", "REST API")
+Rel(mobile_app, api_gateway, "Sends requests (orders, history, reviews)", "REST API")
 Rel(api_gateway, message_broker, "Publishes user actions", "RabbitMQ Events")
 Rel(api_gateway, orders, "Create Order (with cart data and delivery address)", "REST API")
 Rel(orders, message_broker, "Publishes: OrderCreated, OrderFailed, PaymentTimeout (TTL 10min)", "RabbitMQ Events")
@@ -43,3 +45,10 @@ Rel(notification, mobile_app, "Push notifications (e.g., status, tracking)", "We
 Rel(orders, cart, "Clear cart on success/failure", "REST API")
 Rel(delivery, message_broker, "Publishes: DeliveryUpdated (shipped with tracking)", "Events")
 Rel(orders, users, "Save/Fetch delivery addresses in profile", "REST/gRPC")
+Rel(review_service, message_broker, "ReviewSubmitted", "Events")
+Rel_L(message_broker, catalog, "Update product ratings", "Events")
+Rel_L(message_broker, query_orders_service, "Consumes events: OrderStatusUpdated", "Events (CQRS)")
+Rel(api_gateway, query_orders_service, "GET order history", "REST API")
+Rel(query_orders_service, users, "Enrich with profiles/addresses", "gRPC")
+Rel(query_orders_service, payment_gateway, "Fetch totals/cheques", "External API")
+Rel(query_orders_service, orders, "Reorder from history (clone items)", "Events")
