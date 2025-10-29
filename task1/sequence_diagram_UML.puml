@@ -1,0 +1,114 @@
+@startuml NovaMarket_OrderSaga_Sequence
+
+title Sequence Diagram: NovaMarket Order Saga (Success & Error Scenarios)
+
+participant "Mobile App" as App
+participant "API Gateway" as Gateway
+participant "Orders Service" as Orders
+participant "Cart Service" as Cart
+participant "Event Bus" as Bus
+participant "Inventory Service" as Inventory
+participant "Payment Service" as Payment
+participant "Delivery Service" as Delivery
+participant "Notification Service" as Notification
+participant "Users Service" as Users
+
+== Order Creation (Sync Start) ==
+App -> Gateway: POST /orders (cart_id + delivery_address)
+activate Gateway
+Gateway -> Orders: Create draft order
+activate Orders
+Orders -> Cart: Fetch cart items (gRPC)
+activate Cart
+Cart --> Orders: Cart data
+deactivate Cart
+
+Orders -> Bus: Publish: OrderCreated (domain)
+activate Bus
+Bus --> Orders: (async ack)
+deactivate Bus
+
+== Reservation & Payment (Async) ==
+Bus -> Inventory: Consume: ReservationRequested
+activate Inventory
+Inventory -> Bus: Publish: ReservationSucceeded
+deactivate Inventory
+
+Bus -> Payment: Consume: PaymentRequested
+activate Payment
+Payment --> Orders: Generate payment link
+deactivate Payment
+
+== Payment Flow ==
+alt Payment Succeeded
+    App -> Payment: User pays (redirect)
+    activate Payment
+    Payment -> Orders: Webhook: PaymentSucceeded
+    deactivate Payment
+
+    Orders -> Bus: Publish: DeliveryRequested
+    activate Bus
+
+    Bus -> Delivery: Consume: DeliveryRequested
+    activate Delivery
+    Delivery -> Bus: Publish: DeliverySucceeded
+    deactivate Delivery
+
+    Bus -> Notification: Consume: OrderStatusUpdated
+    activate Notification
+    Notification --> App: Push: "Order shipped"
+    deactivate Notification
+
+    Bus -> Users: Update profile history
+    activate Users
+    Users --> Orders: Ack
+    deactivate Users
+
+    Bus --> Orders: All done
+    deactivate Bus
+
+    Orders --> Gateway: 200 Success
+    deactivate Orders
+    Gateway --> App: 200 OK
+    deactivate Gateway
+
+else Payment Timeout (10 min)
+    note over Orders: TTL: Payment timeout
+    Orders -> Bus: Publish: PaymentTimeout
+    activate Bus
+
+    Bus -> Inventory: ReservationReleased (compensation)
+    Bus -> Payment: RefundIssued
+    Bus -> Notification: Notify: "Order cancelled"
+
+    Bus --> Orders: Cancelled
+    deactivate Bus
+
+    Orders --> Gateway: 400 Timeout
+    deactivate Orders
+    Gateway --> App: 400 Cancelled
+    deactivate Gateway
+end
+
+== User Cancellation ==
+opt User Cancels Order
+    App -> Gateway: POST
+    activate Gateway
+    Gateway -> Orders: UserCancelledOrder
+    activate Orders
+
+    Orders -> Bus: Trigger compensation
+    activate Bus
+    Bus -> Inventory: ReservationReleased
+    Bus -> Payment: RefundIssued
+    Bus -> Notification: Notify: "Order cancelled"
+    Bus --> Orders: Done
+    deactivate Bus
+
+    Orders --> Gateway: 200 Cancelled
+    deactivate Orders
+    Gateway --> App: 200 OK
+    deactivate Gateway
+end
+
+@enduml
