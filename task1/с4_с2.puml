@@ -1,0 +1,45 @@
+@startuml NovaMarket_C2_EDA_v2
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+Person(user, "User", "Places orders")
+
+System_Boundary(front, "User Applications") {
+    System_Ext(mobile_app, "Mobile App", "Flutter", "REST API client")
+}
+
+System_Boundary(nova_market, "NovaMarket System Boundary") {
+    Container(api_gateway, "API Gateway", "Microservice (NGINX)", "Routes client requests and publishes events")
+    Container(orders, "Orders Service", "Microservice", "Manages order creation, Saga orchestration, and status")
+    Container(users, "Users Service", "Microservice", "Handles authentication, profiles, and order history")
+    Container(message_broker, "Message Broker", "RabbitMQ", "Buffers and routes events for EDA")
+    Container(inventory, "Inventory Service", "Microservice", "Manages stock levels and reservations")
+    Container(catalog, "Catalog Service", "Microservice", "Filters, lists, and aggregates product data")
+    Container(cart, "Cart Service", "Microservice (Redis)", "Temporary storage for user cart items")
+    Container(notification, "Notification Service", "Microservice", "Sends status alerts to users and sellers")
+}
+
+System_Ext(payment_gateway, "Payment Gateway", "External Service", "Processes payments and webhooks")
+System_Ext(delivery, "Delivery Service", "External Service", "Handles shipping and tracking")
+
+' === Связи ===
+Rel(user, mobile_app, "Uses app", "REST")
+Rel(mobile_app, api_gateway, "Sends requests (e.g., create order with address)", "REST API")
+Rel(api_gateway, message_broker, "Publishes user actions", "RabbitMQ Events")
+Rel(api_gateway, orders, "Create Order (with cart data and delivery address)", "REST API")
+Rel(orders, message_broker, "Publishes: OrderCreated, OrderFailed, PaymentTimeout (TTL 10min)", "RabbitMQ Events")
+Rel(message_broker, inventory, "Consumes: ReservationRequested", "RabbitMQ Events")
+Rel(inventory, message_broker, "Publishes: StockStatusUpdated", "RabbitMQ Events")
+Rel(payment_gateway, orders, "Webhook: PaymentSucceeded", "HTTP Callback")
+Rel(message_broker, delivery, "DeliveryRequested", "RabbitMQ Events")
+Rel(inventory, catalog, "Provides stock data for filtering", "REST API")
+Rel(catalog, api_gateway, "Returns filtered products", "REST API")
+Rel(message_broker, notification, "Consumes: Status Updates", "RabbitMQ Events")
+Rel(api_gateway, cart, "Get/Add/Remove Items", "REST API")
+Rel(cart, orders, "Transfer cart data to order", "REST/gRPC")
+Rel_L(message_broker, users, "Updates user history/profile", "Events")
+Rel(api_gateway, users, "Auth & Profile Operations", "REST API")
+Rel(notification, mobile_app, "Push notifications (e.g., status, tracking)", "WebSocket/Push API")
+Rel(orders, cart, "Clear cart on success/failure", "REST API")
+Rel(delivery, message_broker, "Publishes: DeliveryUpdated (shipped with tracking)", "Events")
+Rel(orders, users, "Save/Fetch delivery addresses in profile", "REST/gRPC")
